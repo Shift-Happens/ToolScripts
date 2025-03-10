@@ -1,0 +1,36 @@
+{
+    "source": "mysql://root:haslo@localhost:3306/stara_baza",
+    "target": "postgresql://postgres:haslo@localhost:5432/nowa_baza",
+    "tables": ["klienci", "zamowienia", "produkty", "kategorie"],
+    "exclude_tables": ["sesje", "logi", "tymczasowe"],
+    "options": {
+        "batch_size": 2000,
+        "truncate": true,
+        "create_tables": true,
+        "drop_tables": false,
+        "only_schema": false,
+        "dry_run": false,
+        "verbose": true,
+        "log_file": "/var/log/migrator.log"
+    },
+    "type_mappings": {
+        "TINYINT(1)": "BOOLEAN",
+        "VARCHAR": "CHARACTER VARYING",
+        "TEXT": "TEXT",
+        "INT": "INTEGER",
+        "BIGINT": "BIGINT",
+        "DATETIME": "TIMESTAMP",
+        "DECIMAL": "NUMERIC"
+    },
+    "transformations": {
+        "klienci": {
+            "email": "lower({value})",
+            "nazwisko": "{value}.title() if {value} else {value}",
+            "telefon": "\"{}\".format({value}.replace('-', '').replace(' ', ''))"
+        },
+        "zamowienia": {
+            "status": "'ZAKOŃCZONE' if {value} == 'COMPLETED' else {value}",
+            "kwota": "round(float({value}), 2)"
+        }
+    }
+}

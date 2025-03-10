@@ -1,0 +1,81 @@
+{
+    "base_url": "https://api.example.com/v1",
+    "endpoints": [
+      {
+        "name": "Lista użytkowników",
+        "path": "/users",
+        "method": "GET",
+        "expected_status": 200,
+        "headers": {
+          "Authorization": "Bearer YOUR_API_TOKEN",
+          "Content-Type": "application/json"
+        },
+        "validate": [
+          {
+            "type": "field_exists",
+            "field": "data"
+          },
+          {
+            "type": "array_length",
+            "field": "data",
+            "min": 1
+          }
+        ]
+      },
+      {
+        "name": "Szczegóły użytkownika",
+        "path": "/users/1",
+        "method": "GET",
+        "expected_status": 200,
+        "headers": {
+          "Authorization": "Bearer YOUR_API_TOKEN"
+        },
+        "validate": [
+          {
+            "type": "field_exists",
+            "field": "id"
+          },
+          {
+            "type": "field_exists",
+            "field": "name"
+          },
+          {
+            "type": "field_exists",
+            "field": "email"
+          }
+        ]
+      },
+      {
+        "name": "Utworzenie użytkownika",
+        "path": "/users",
+        "method": "POST",
+        "expected_status": 201,
+        "headers": {
+          "Authorization": "Bearer YOUR_API_TOKEN",
+          "Content-Type": "application/json"
+        },
+        "payload": {
+          "name": "Jan Testowy",
+          "email": "jan.testowy@example.com",
+          "role": "user"
+        },
+        "validate": [
+          {
+            "type": "field_exists",
+            "field": "id"
+          },
+          {
+            "type": "field_value",
+            "field": "name",
+            "value": "Jan Testowy"
+          }
+        ]
+      },
+      {
+        "name": "Nieistniejący zasób",
+        "path": "/nonexistent",
+        "method": "GET",
+        "expected_status": 404
+      }
+    ]
+  }

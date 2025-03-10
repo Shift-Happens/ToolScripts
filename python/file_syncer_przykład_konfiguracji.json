@@ -1,0 +1,31 @@
+{
+    "sync_pairs": [
+      {
+        "source": "/home/user/dokumenty",
+        "destination": "/media/backup/dokumenty",
+        "sync_mode": "one-way",
+        "exclude": ["*.tmp", "*.log", ".git/", "node_modules/"],
+        "include": ["*.doc", "*.pdf", "*.txt"],
+        "use_checksum": true,
+        "backup": true
+      },
+      {
+        "source": "/home/user/projekty",
+        "destination": "user@serwer:/home/user/projekty",
+        "sync_mode": "two-way",
+        "exclude": ["*.tmp", "venv/", "*.pyc"],
+        "ssh_key": "~/.ssh/id_rsa"
+      },
+      {
+        "source": "/home/user/zdjęcia",
+        "destination": "/media/dysk_zewnętrzny/backup/zdjęcia",
+        "sync_mode": "mirror",
+        "exclude": ["miniatury/", "tymczasowe/"]
+      }
+    ],
+    "global_options": {
+      "verbose": true,
+      "log_file": "/var/log/file_syncer.log",
+      "port": 22
+    }
+  }

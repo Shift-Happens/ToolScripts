@@ -1,5 +1,49 @@
 # main.tf - Centralna platforma logowania z Grafaną
 
+#Jak korzystać z modułu:
+#hclCopymodule "centralized_logging" {
+#  source = "./modules/centralized-logging-platform"
+#  
+#  name_prefix = "org-name"
+#  environment = "production"
+#  
+#  vpc_id     = module.vpc.vpc_id
+#  subnet_ids = module.vpc.private_subnets
+#  
+#  # Konfiguracja OpenSearch
+#  enable_opensearch        = true
+#  opensearch_instance_type = "r6g.xlarge.search"
+#  opensearch_instance_count = 3
+#  opensearch_ebs_volume_size = 200
+#  
+#  # Konfiguracja Grafana
+#  enable_grafana = true
+#  admin_users    = ["arn:aws:iam::123456789012:user/admin1"]
+#  reader_users   = ["arn:aws:iam::123456789012:user/reader1"]
+#  
+#  # Konfiguracja Prometheus
+#  enable_prometheus = true
+#  
+#  # Konfiguracja alertów
+#  enable_alerting = true
+#  alert_notification_emails = [
+#    "devops@example.com",
+#    "alerts@example.com"
+#  ]
+#  
+#  # Fluent Bit dla EC2
+#  enable_fluentbit = true
+#  
+#  # Retencja logów (w dniach)
+#  retention_days = 90
+#  
+#  tags = {
+#    Project     = "Infrastructure"
+#    CostCenter  = "IT"
+#    Environment = "Production"
+#  }
+#}
+
 terraform {
   required_providers {
     aws = {

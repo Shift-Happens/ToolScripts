@@ -1,0 +1,415 @@
+version: '3.8'
+
+# =====================================================================
+# CENTRALIZED LOGGING PIPELINE
+# =====================================================================
+# This stack provides a complete logging solution with two options:
+# 1. ELK Stack (Elasticsearch, Logstash, Kibana)
+# 2. EFK Stack (Elasticsearch, Fluentd, Kibana)
+#
+# It includes:
+# - Log collection from containers and applications
+# - Log processing and transformation
+# - Log storage with indexing and search capabilities
+# - Log visualization with dashboards
+# - Log alerting capabilities
+# =====================================================================
+
+services:
+  # ===================================================================
+  # ELASTICSEARCH - Storage and search engine for logs
+  # ===================================================================
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.7.1
+    container_name: elasticsearch
+    environment:
+      - node.name=elasticsearch
+      - cluster.name=es-docker-cluster
+      - discovery.type=single-node
+      - bootstrap.memory_lock=true
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+      - xpack.security.enabled=false
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    networks:
+      - logging-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -q '\"status\":\"green\"\\|\"status\":\"yellow\"'"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+    restart: unless-stopped
+
+  # ===================================================================
+  # KIBANA - Visualization platform for logs
+  # ===================================================================
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.7.1
+    container_name: kibana
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - XPACK_ENCRYPTEDSAVEDOBJECTS_ENCRYPTIONKEY=d1a66dfd-2a67-4d8c-a491-9603cbd62c7e
+    ports:
+      - "5601:5601"
+    networks:
+      - logging-network
+    depends_on:
+      - elasticsearch
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s -I http://localhost:5601 | grep -q 'HTTP/1.1 302 Found'"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+
+  # ===================================================================
+  # LOGSTASH - Log processing pipeline (ELK Stack option)
+  # ===================================================================
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.7.1
+    container_name: logstash
+    volumes:
+      - ./logstash/pipeline:/usr/share/logstash/pipeline
+      - ./logstash/config/logstash.yml:/usr/share/logstash/config/logstash.yml
+      - ./logstash/config/pipelines.yml:/usr/share/logstash/config/pipelines.yml
+    ports:
+      - "5044:5044"   # Beats input
+      - "5000:5000"   # TCP input
+      - "9600:9600"   # API endpoint
+      - "5000:5000/udp"  # UDP input
+    environment:
+      - "LS_JAVA_OPTS=-Xms256m -Xmx256m"
+    networks:
+      - logging-network
+    depends_on:
+      - elasticsearch
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s -I http://localhost:9600 | grep -q 'HTTP/1.1 200 OK'"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  # ===================================================================
+  # FLUENTD - Log collector and processor (EFK Stack option)
+  # ===================================================================
+  fluentd:
+    build:
+      context: ./fluentd
+      dockerfile: Dockerfile
+    container_name: fluentd
+    volumes:
+      - ./fluentd/conf:/fluentd/etc
+      - fluentd-buffer:/fluentd/buffer
+    ports:
+      - "24224:24224"
+      - "24224:24224/udp"
+    environment:
+      - FLUENTD_CONF=fluent.conf
+    networks:
+      - logging-network
+    depends_on:
+      - elasticsearch
+    restart: unless-stopped
+
+  # ===================================================================
+  # FILEBEAT - Lightweight log shipper for sending logs to Logstash/Elasticsearch
+  # ===================================================================
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:8.7.1
+    container_name: filebeat
+    user: root
+    volumes:
+      - ./filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/log:/var/log:ro
+      - filebeat-data:/usr/share/filebeat/data
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - KIBANA_HOST=http://kibana:5601
+      - LOGSTASH_HOST=logstash:5044
+    networks:
+      - logging-network
+    depends_on:
+      - elasticsearch
+      - kibana
+      - logstash
+    restart: unless-stopped
+
+  # ===================================================================
+  # METRICBEAT - Collects metrics from system and services
+  # ===================================================================
+  metricbeat:
+    image: docker.elastic.co/beats/metricbeat:8.7.1
+    container_name: metricbeat
+    user: root
+    volumes:
+      - ./metricbeat/metricbeat.yml:/usr/share/metricbeat/metricbeat.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /sys/fs/cgroup:/hostfs/sys/fs/cgroup:ro
+      - /proc:/hostfs/proc:ro
+      - /:/hostfs:ro
+      - metricbeat-data:/usr/share/metricbeat/data
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - KIBANA_HOST=http://kibana:5601
+    networks:
+      - logging-network
+    depends_on:
+      - elasticsearch
+      - kibana
+    restart: unless-stopped
+
+  # ===================================================================
+  # HEARTBEAT - Uptime monitoring
+  # ===================================================================
+  heartbeat:
+    image: docker.elastic.co/beats/heartbeat:8.7.1
+    container_name: heartbeat
+    volumes:
+      - ./heartbeat/heartbeat.yml:/usr/share/heartbeat/heartbeat.yml:ro
+      - heartbeat-data:/usr/share/heartbeat/data
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - KIBANA_HOST=http://kibana:5601
+    networks:
+      - logging-network
+    depends_on:
+      - elasticsearch
+      - kibana
+    restart: unless-stopped
+
+  # ===================================================================
+  # APM SERVER - Application Performance Monitoring (Optional)
+  # ===================================================================
+  apm-server:
+    image: docker.elastic.co/apm/apm-server:8.7.1
+    container_name: apm-server
+    volumes:
+      - ./apm-server/apm-server.yml:/usr/share/apm-server/apm-server.yml:ro
+      - apm-server-data:/usr/share/apm-server/data
+    ports:
+      - "8200:8200"
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - KIBANA_HOST=http://kibana:5601
+    networks:
+      - logging-network
+    depends_on:
+      - elasticsearch
+      - kibana
+    restart: unless-stopped
+
+networks:
+  logging-network:
+    driver: bridge
+
+volumes:
+  elasticsearch-data:
+  filebeat-data:
+  metricbeat-data:
+  heartbeat-data:
+  apm-server-data:
+  fluentd-buffer:
+
+# =======================================================================
+# CONFIGURATION FILES
+# =======================================================================
+
+# Logstash Pipeline Configuration (logstash/pipeline/logstash.conf)
+# ----------------------------------------------------------------
+# input {
+#   beats {
+#     port => 5044
+#   }
+#   tcp {
+#     port => 5000
+#     codec => json
+#   }
+#   udp {
+#     port => 5000
+#     codec => json
+#   }
+# }
+# 
+# filter {
+#   if [container][name] {
+#     mutate {
+#       add_field => { "application" => "%{[container][name]}" }
+#     }
+#   }
+#   
+#   # Parse JSON logs
+#   if [message] =~ /^\{.*\}$/ {
+#     json {
+#       source => "message"
+#     }
+#   }
+#   
+#   # Add timestamp if missing
+#   if ![timestamp] and [time] {
+#     date {
+#       match => [ "time", "ISO8601" ]
+#       target => "@timestamp"
+#     }
+#   }
+#   
+#   # Extract log level
+#   grok {
+#     match => { "message" => "(?<log_level>INFO|DEBUG|WARN|ERROR|TRACE|FATAL)" }
+#   }
+# }
+# 
+# output {
+#   elasticsearch {
+#     hosts => ["elasticsearch:9200"]
+#     index => "logstash-%{+YYYY.MM.dd}"
+#   }
+# }
+
+# Filebeat Configuration (filebeat/filebeat.yml)
+# ----------------------------------------------------------------
+# filebeat.config:
+#   modules:
+#     path: ${path.config}/modules.d/*.yml
+#     reload.enabled: false
+# 
+# filebeat.autodiscover:
+#   providers:
+#     - type: docker
+#       hints.enabled: true
+# 
+# processors:
+#   - add_docker_metadata: ~
+#   - add_cloud_metadata: ~
+#   - add_host_metadata: ~
+# 
+# output.logstash:
+#   hosts: ["logstash:5044"]
+# 
+# logging.json: true
+# logging.metrics.enabled: false
+
+# Fluentd Configuration (fluentd/conf/fluent.conf)
+# ----------------------------------------------------------------
+# <source>
+#   @type forward
+#   port 24224
+#   bind 0.0.0.0
+# </source>
+# 
+# <source>
+#   @type http
+#   port 9880
+#   bind 0.0.0.0
+# </source>
+# 
+# <filter **>
+#   @type record_transformer
+#   <record>
+#     hostname "#{Socket.gethostname}"
+#   </record>
+# </filter>
+# 
+# <match **>
+#   @type elasticsearch
+#   host elasticsearch
+#   port 9200
+#   logstash_format true
+#   logstash_prefix fluentd
+#   <buffer>
+#     @type file
+#     path /fluentd/buffer/buffer
+#     flush_mode interval
+#     flush_interval 5s
+#     chunk_limit_size 2M
+#     queue_limit_length 8
+#     retry_max_interval 30
+#     retry_forever true
+#   </buffer>
+# </match>
+
+# Fluentd Dockerfile (fluentd/Dockerfile)
+# ----------------------------------------------------------------
+# FROM fluent/fluentd:v1.16-1
+# 
+# USER root
+# 
+# # Install dependencies and Elasticsearch plugin
+# RUN apk add --no-cache --update --virtual .build-deps \
+#     sudo build-base ruby-dev \
+#  && sudo gem install fluent-plugin-elasticsearch \
+#  && sudo gem sources --clear-all \
+#  && apk del .build-deps \
+#  && rm -rf /tmp/* /var/tmp/* /usr/lib/ruby/gems/*/cache/*.gem
+# 
+# USER fluent
+
+# ==========================================
+# USAGE GUIDES
+# ==========================================
+
+# Choosing Between ELK and EFK
+# ---------------------------
+# ELK Stack (Elasticsearch, Logstash, Kibana)
+# - More flexible log processing with Logstash
+# - Powerful filter capabilities
+# - Higher resource requirements
+# - Better for complex log transformations
+#
+# EFK Stack (Elasticsearch, Fluentd, Kibana)
+# - More lightweight than Logstash
+# - Better performance for high-volume logs
+# - More plugin ecosystem
+# - Better for containerized environments
+
+# Common Use Cases
+# ---------------------------
+# 1. Application Logging
+#    - Send logs from your applications to Logstash/Fluentd
+#    - View and analyze in Kibana
+# 
+# 2. Container Logging
+#    - Docker logs are automatically collected via Filebeat
+#    - Filter and process through Logstash/Fluentd
+# 
+# 3. System Logging
+#    - Collect system logs with Filebeat
+#    - Monitor system metrics with Metricbeat
+# 
+# 4. Network Logging
+#    - Collect network logs with Packetbeat
+#    - Analyze traffic patterns and anomalies
+
+# Example: Adding a custom application to the logging pipeline
+# ----------------------------------------------------------
+# version: '3.8'
+# services:
+#   my-app:
+#     image: my-application:latest
+#     logging:
+#       driver: "fluentd"  # For EFK stack
+#       options:
+#         fluentd-address: localhost:24224
+#         tag: my-application
+#
+# OR
+#
+# version: '3.8'
+# services:
+#   my-app:
+#     image: my-application:latest
+#     volumes:
+#       - ./logs:/var/log/my-app
+# # Then configure Filebeat to collect logs from /var/log/my-app

@@ -1,0 +1,238 @@
+# Database Migration Container
+# A specialized container for running database migrations safely in production environments
+
+# -------------------------
+# Stage 1: Builder
+# -------------------------
+FROM alpine:3.16 as builder
+
+# Install build dependencies
+RUN apk add --no-cache \
+    curl \
+    unzip \
+    # Add any other build dependencies here
+
+# Install migration tools
+# Example: Flyway
+RUN curl -L https://repo1.maven.org/maven2/org/flywaydb/flyway-commandline/9.8.1/flyway-commandline-9.8.1-linux-x64.tar.gz | tar xvz && \
+    mv flyway-9.8.1 flyway
+
+# Example: Liquibase (alternative)
+RUN mkdir -p /opt/liquibase && \
+    curl -L https://github.com/liquibase/liquibase/releases/download/v4.17.2/liquibase-4.17.2.tar.gz | tar xvz -C /opt/liquibase
+
+# -------------------------
+# Stage 2: Final image
+# -------------------------
+FROM alpine:3.16
+
+# Set working directory
+WORKDIR /migrations
+
+# Install runtime dependencies
+RUN apk add --no-cache \
+    bash \
+    openjdk11-jre-headless \
+    postgresql-client \
+    mysql-client \
+    # Add any other database clients you need
+    curl \
+    jq \
+    && rm -rf /var/cache/apk/*
+
+# Copy migration tools from builder
+COPY --from=builder /flyway /opt/flyway
+COPY --from=builder /opt/liquibase /opt/liquibase
+
+# Add to PATH
+ENV PATH="/opt/flyway:/opt/liquibase:${PATH}"
+
+# Add database drivers
+# PostgreSQL driver for both tools
+RUN curl -L https://jdbc.postgresql.org/download/postgresql-42.5.0.jar -o /opt/flyway/drivers/postgresql-42.5.0.jar && \
+    cp /opt/flyway/drivers/postgresql-42.5.0.jar /opt/liquibase/lib/postgresql-42.5.0.jar
+
+# MySQL driver for both tools
+RUN curl -L https://repo1.maven.org/maven2/mysql/mysql-connector-java/8.0.30/mysql-connector-java-8.0.30.jar -o /opt/flyway/drivers/mysql-connector-java-8.0.30.jar && \
+    cp /opt/flyway/drivers/mysql-connector-java-8.0.30.jar /opt/liquibase/lib/mysql-connector-java-8.0.30.jar
+
+# Create non-root user
+RUN addgroup -S migrator && adduser -S migrator -G migrator
+RUN mkdir -p /migrations/sql /migrations/changelog && chown -R migrator:migrator /migrations
+
+# Create directories for configuration and scripts
+RUN mkdir -p /migrations/config /migrations/scripts && chown -R migrator:migrator /migrations
+
+# Copy migration scripts and configurations
+# (These will be mounted in actual use)
+COPY ./scripts/ /migrations/scripts/
+COPY ./config/ /migrations/config/
+
+# Make scripts executable
+RUN chmod +x /migrations/scripts/*.sh
+
+# Set environment variables
+ENV FLYWAY_LOCATIONS=filesystem:/migrations/sql
+ENV LIQUIBASE_CHANGELOG_FILE=/migrations/changelog/changelog-master.xml
+
+# Switch to non-root user
+USER migrator
+
+# Health check
+HEALTHCHECK --interval=5s --timeout=3s --retries=3 \
+    CMD ["/migrations/scripts/health-check.sh"]
+
+# Default command
+ENTRYPOINT ["/migrations/scripts/entrypoint.sh"]
+
+# -------------------------
+# Example of scripts to include
+# -------------------------
+
+# Example entrypoint.sh:
+# #!/bin/bash
+# set -e
+# 
+# # Wait for database to be ready
+# /migrations/scripts/wait-for-db.sh
+# 
+# # Determine which migration tool to use
+# if [[ "${MIGRATION_TOOL}" == "liquibase" ]]; then
+#   echo "Running Liquibase migrations..."
+#   liquibase --defaultsFile=/migrations/config/liquibase.properties update
+# else
+#   echo "Running Flyway migrations..."
+#   flyway -configFiles=/migrations/config/flyway.conf migrate
+# fi
+# 
+# echo "Migrations completed successfully!"
+
+# Example wait-for-db.sh:
+# #!/bin/bash
+# set -e
+# 
+# echo "Waiting for database to be ready..."
+# 
+# case "${DB_TYPE}" in
+#   postgres)
+#     until PGPASSWORD="${DB_PASSWORD}" psql -h "${DB_HOST}" -U "${DB_USER}" -d "${DB_NAME}" -c '\q'; do
+#       echo "PostgreSQL is unavailable - sleeping"
+#       sleep 1
+#     done
+#     ;;
+#   mysql)
+#     until mysql -h "${DB_HOST}" -u "${DB_USER}" -p"${DB_PASSWORD}" -e "SELECT 1"; do
+#       echo "MySQL is unavailable - sleeping"
+#       sleep 1
+#     done
+#     ;;
+#   *)
+#     echo "Unsupported database type: ${DB_TYPE}"
+#     exit 1
+#     ;;
+# esac
+# 
+# echo "Database is ready!"
+
+# Example health-check.sh:
+# #!/bin/bash
+# 
+# # Simple health check to verify the container is responsive
+# if [[ -f /migrations/.migration-running ]]; then
+#   # Migration in progress
+#   exit 0
+# fi
+# 
+# if [[ -f /migrations/.migration-failed ]]; then
+#   # Migration failed
+#   exit 1
+# fi
+# 
+# # No migration running or has completed successfully
+# exit 0
+
+# -------------------------
+# Example deployment in Kubernetes
+# -------------------------
+
+# apiVersion: batch/v1
+# kind: Job
+# metadata:
+#   name: database-migration
+# spec:
+#   backoffLimit: 3
+#   template:
+#     spec:
+#       containers:
+#       - name: migration
+#         image: your-registry/database-migration:latest
+#         env:
+#         - name: DB_TYPE
+#           value: postgres
+#         - name: DB_HOST
+#           valueFrom:
+#             configMapKeyRef:
+#               name: db-config
+#               key: host
+#         - name: DB_NAME
+#           valueFrom:
+#             configMapKeyRef:
+#               name: db-config
+#               key: dbname
+#         - name: DB_USER
+#           valueFrom:
+#             secretKeyRef:
+#               name: db-credentials
+#               key: username
+#         - name: DB_PASSWORD
+#           valueFrom:
+#             secretKeyRef:
+#               name: db-credentials
+#               key: password
+#         - name: MIGRATION_TOOL
+#           value: flyway
+#         volumeMounts:
+#         - name: migrations-volume
+#           mountPath: /migrations/sql
+#         - name: config-volume
+#           mountPath: /migrations/config
+#       volumes:
+#       - name: migrations-volume
+#         configMap:
+#           name: sql-migrations
+#       - name: config-volume
+#         configMap:
+#           name: migration-config
+#       restartPolicy: Never
+
+# -------------------------
+# Example with Docker Compose
+# -------------------------
+
+# version: '3.8'
+# services:
+#   db:
+#     image: postgres:14-alpine
+#     environment:
+#       POSTGRES_USER: dbuser
+#       POSTGRES_PASSWORD: dbpass
+#       POSTGRES_DB: appdb
+#     ports:
+#       - "5432:5432"
+# 
+#   migration:
+#     build:
+#       context: .
+#       dockerfile: Dockerfile
+#     environment:
+#       DB_TYPE: postgres
+#       DB_HOST: db
+#       DB_NAME: appdb
+#       DB_USER: dbuser
+#       DB_PASSWORD: dbpass
+#       MIGRATION_TOOL: flyway
+#     volumes:
+#       - ./migrations/sql:/migrations/sql
+#       - ./migrations/config:/migrations/config
+#     depends_on:
+#       - db

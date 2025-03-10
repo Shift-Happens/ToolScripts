@@ -1,0 +1,270 @@
+# =============================================================================
+# MICROSERVICE STARTER KIT DOCKERFILE
+# =============================================================================
+# A production-ready Dockerfile template for containerized microservices
+# following cloud-native best practices.
+#
+# Features:
+# - Multi-stage build for minimal image size
+# - Proper layer caching for faster builds
+# - Non-root user for security
+# - Health checks and appropriate settings
+# - Comprehensive comments explaining each section
+# - Compatible with Go, Node.js, Python, and Java (examples included)
+# =============================================================================
+
+# =============================================================================
+# GO MICROSERVICE (DEFAULT CONFIGURATION)
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# STAGE 1: BUILD ENVIRONMENT
+# -----------------------------------------------------------------------------
+FROM golang:1.19-alpine AS builder
+
+# Install build dependencies
+RUN apk add --no-cache git ca-certificates tzdata && \
+    update-ca-certificates
+
+# Set working directory
+WORKDIR /app
+
+# Copy dependency files first (better caching)
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build the application with security flags
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -ldflags="-w -s -X main.version=$(git rev-parse --short HEAD)" \
+    -a -installsuffix cgo \
+    -o /go/bin/microservice ./src/main.go
+
+# -----------------------------------------------------------------------------
+# STAGE 2: RUNTIME ENVIRONMENT
+# -----------------------------------------------------------------------------
+FROM gcr.io/distroless/static:nonroot
+
+# Set working directory
+WORKDIR /app
+
+# Copy the binary from builder stage
+COPY --from=builder /go/bin/microservice .
+COPY --from=builder /app/config/config.yaml ./config/
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
+
+# Set timezone (can be overridden at runtime)
+ENV TZ=Etc/UTC
+
+# Configure service
+ENV PORT=8080
+ENV GIN_MODE=release
+ENV LOG_LEVEL=info
+
+# Use non-root user (for security)
+USER nonroot:nonroot
+
+# Expose service port
+EXPOSE 8080
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD ["/app/microservice", "health"]
+
+# Command to run
+ENTRYPOINT ["/app/microservice"]
+
+# =============================================================================
+# ALTERNATIVE CONFIGURATIONS (UNCOMMENT AS NEEDED)
+# =============================================================================
+
+# =============================================================================
+# NODE.JS MICROSERVICE
+# =============================================================================
+# # -----------------------------------------------------------------------------
+# # STAGE 1: BUILD ENVIRONMENT
+# # -----------------------------------------------------------------------------
+# FROM node:18-alpine AS builder
+# 
+# # Set working directory
+# WORKDIR /app
+# 
+# # Copy dependency files first (better caching)
+# COPY package.json package-lock.json ./
+# RUN npm ci
+# 
+# # Copy source code
+# COPY . .
+# 
+# # Build the application (if using TypeScript or a build step)
+# RUN npm run build
+# 
+# # -----------------------------------------------------------------------------
+# # STAGE 2: RUNTIME ENVIRONMENT
+# # -----------------------------------------------------------------------------
+# FROM node:18-alpine
+# 
+# # Set working directory
+# WORKDIR /app
+# 
+# # Create and use non-root user
+# RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+# 
+# # Copy only production dependencies and built app
+# COPY --from=builder /app/package.json /app/package-lock.json ./
+# COPY --from=builder /app/dist ./dist
+# COPY --from=builder /app/config ./config
+# 
+# # Install only production dependencies
+# RUN npm ci --only=production && npm cache clean --force
+# 
+# # Configure service
+# ENV NODE_ENV=production
+# ENV PORT=8080
+# 
+# # Use non-root user
+# USER appuser
+# 
+# # Expose service port
+# EXPOSE 8080
+# 
+# # Health check
+# HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+#   CMD wget -qO- http://localhost:8080/health || exit 1
+# 
+# # Command to run
+# CMD ["node", "dist/index.js"]
+
+# =============================================================================
+# PYTHON MICROSERVICE
+# =============================================================================
+# # -----------------------------------------------------------------------------
+# # STAGE 1: BUILD ENVIRONMENT
+# # -----------------------------------------------------------------------------
+# FROM python:3.9-slim AS builder
+# 
+# # Set working directory
+# WORKDIR /app
+# 
+# # Install build dependencies
+# RUN apt-get update && apt-get install -y --no-install-recommends \
+#     gcc \
+#     && rm -rf /var/lib/apt/lists/*
+# 
+# # Install Python dependencies
+# COPY requirements.txt .
+# RUN pip install --no-cache-dir --user -r requirements.txt
+# 
+# # Copy source code
+# COPY . .
+# 
+# # -----------------------------------------------------------------------------
+# # STAGE 2: RUNTIME ENVIRONMENT
+# # -----------------------------------------------------------------------------
+# FROM python:3.9-slim
+# 
+# # Set working directory
+# WORKDIR /app
+# 
+# # Create and use non-root user
+# RUN groupadd -r appuser && useradd -r -g appuser appuser
+# 
+# # Copy Python packages and application code
+# COPY --from=builder /root/.local /home/appuser/.local
+# COPY --from=builder /app /app
+# 
+# # Set environment variables
+# ENV PATH=/home/appuser/.local/bin:$PATH
+# ENV PYTHONUNBUFFERED=1
+# ENV PORT=8080
+# 
+# # Use non-root user
+# USER appuser
+# 
+# # Expose service port
+# EXPOSE 8080
+# 
+# # Health check
+# HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+#   CMD python -c "import requests; requests.get('http://localhost:8080/health')" || exit 1
+# 
+# # Command to run
+# CMD ["gunicorn", "--bind", "0.0.0.0:8080", "app.main:app"]
+
+# =============================================================================
+# JAVA MICROSERVICE
+# =============================================================================
+# # -----------------------------------------------------------------------------
+# # STAGE 1: BUILD ENVIRONMENT
+# # -----------------------------------------------------------------------------
+# FROM maven:3.8-openjdk-17 AS builder
+# 
+# # Set working directory
+# WORKDIR /app
+# 
+# # Copy dependency specifications first (better caching)
+# COPY pom.xml .
+# RUN mvn dependency:go-offline -B
+# 
+# # Copy source code
+# COPY src/ ./src/
+# 
+# # Build the application
+# RUN mvn package -DskipTests
+# 
+# # -----------------------------------------------------------------------------
+# # STAGE 2: RUNTIME ENVIRONMENT
+# # -----------------------------------------------------------------------------
+# FROM openjdk:17-jre-slim
+# 
+# # Set working directory
+# WORKDIR /app
+# 
+# # Create and use non-root user
+# RUN groupadd -r appuser && useradd -r -g appuser appuser
+# 
+# # Copy JAR file from builder stage
+# COPY --from=builder /app/target/*.jar app.jar
+# COPY --from=builder /app/src/main/resources/config ./config
+# 
+# # Set environment variables
+# ENV JAVA_OPTS="-Xms256m -Xmx512m"
+# ENV PORT=8080
+# 
+# # Use non-root user
+# USER appuser
+# 
+# # Expose service port
+# EXPOSE 8080
+# 
+# # Health check
+# HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+#   CMD wget -qO- http://localhost:8080/actuator/health || exit 1
+# 
+# # Command to run
+# ENTRYPOINT ["java", "-jar", "app.jar"]
+
+# =============================================================================
+# USAGE INSTRUCTIONS 
+# =============================================================================
+#
+# BUILD THE IMAGE:
+# docker build -t my-microservice:latest .
+#
+# RUN LOCALLY:
+# docker run -p 8080:8080 -e "ENV=dev" my-microservice:latest
+#
+# RUN WITH CUSTOM CONFIG:
+# docker run -p 8080:8080 -v $(pwd)/config:/app/config my-microservice:latest
+#
+# HEALTHCHECK:
+# docker inspect --format "{{json .State.Health }}" <container_id>
+#
+# PUSH TO REGISTRY:
+# docker tag my-microservice:latest registry.example.com/my-microservice:latest
+# docker push registry.example.com/my-microservice:latest
+#
+# =============================================================================

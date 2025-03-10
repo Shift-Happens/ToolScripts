@@ -1,0 +1,100 @@
+# Multi-stage build Dockerfile template
+# This template demonstrates how to use multi-stage builds to create smaller, more efficient Docker images
+
+# -----------------------------
+# Stage 1: Build environment
+# -----------------------------
+FROM node:18-alpine AS build
+
+# Set working directory
+WORKDIR /app
+
+# Copy package files first (for better caching)
+COPY package.json package-lock.json ./
+
+# Install dependencies
+RUN npm ci
+
+# Copy source code
+COPY . .
+
+# Build the application
+RUN npm run build
+
+# -----------------------------
+# Stage 2: Production environment
+# -----------------------------
+FROM node:18-alpine AS production
+
+# Set working directory
+WORKDIR /app
+
+# Create non-root user for security
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+
+# Copy only the build artifacts and necessary files from previous stage
+COPY --from=build /app/dist ./dist
+COPY --from=build /app/package.json ./
+COPY --from=build /app/package-lock.json ./
+
+# Install only production dependencies
+RUN npm ci --only=production && \
+    npm cache clean --force
+
+# Set environment to production
+ENV NODE_ENV production
+
+# Use non-root user
+USER appuser
+
+# Expose port (if needed)
+EXPOSE 3000
+
+# Start command
+CMD ["node", "dist/index.js"]
+
+# -----------------------------
+# Usage examples with variations
+# -----------------------------
+
+# For Python applications:
+# FROM python:3.9-slim AS build
+# WORKDIR /app
+# COPY requirements.txt .
+# RUN pip install --no-cache-dir -r requirements.txt
+# COPY . .
+# RUN python -m pytest && python setup.py build
+#
+# FROM python:3.9-slim AS production
+# WORKDIR /app
+# COPY --from=build /app/build ./build
+# COPY --from=build /app/requirements.txt .
+# RUN pip install --no-cache-dir -r requirements.txt
+# CMD ["python", "-m", "app.main"]
+
+# For Go applications:
+# FROM golang:1.18-alpine AS build
+# WORKDIR /app
+# COPY go.mod go.sum ./
+# RUN go mod download
+# COPY . .
+# RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o app .
+#
+# FROM alpine:latest AS production
+# RUN apk --no-cache add ca-certificates
+# WORKDIR /root/
+# COPY --from=build /app/app .
+# CMD ["./app"]
+
+# For Java applications:
+# FROM maven:3.8-openjdk-17 AS build
+# WORKDIR /app
+# COPY pom.xml .
+# RUN mvn dependency:go-offline
+# COPY src/ ./src/
+# RUN mvn package -DskipTests
+#
+# FROM openjdk:17-jre-slim AS production
+# WORKDIR /app
+# COPY --from=build /app/target/*.jar app.jar
+# ENTRYPOINT ["java", "-jar", "app.jar"]

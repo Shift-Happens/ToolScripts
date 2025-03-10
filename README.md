@@ -49,7 +49,7 @@ ToolScripts/
 
 ## Usage
 
-Most scripts include usage instructions at the top of the file or within example configuration JSON files. For Docker components and Terraform modules, refer to the README files in their respective directories.
+Most scripts include usage instructions at the top of the file or within example configuration JSON files.
 
 ## Categories
 

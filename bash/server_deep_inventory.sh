@@ -1,6 +1,7 @@
 #!/bin/bash
 # server_deep_inventory.sh - Kompleksowa inwentaryzacja serwera
-# Opis: Skrypt zbiera szczegółowe informacje o konfiguracji serwera do celów migracji po czym robi backup plików konfiguracyjnych i pakuje je do folderu.tar
+# Opis: Skrypt zbiera szczegółowe informacje o konfiguracji serwera do celów migracji po czym robi backup plików konfiguracyjnych i pakuje je do folderu.tar wraz z raportem w formacie .md
+
 
 # Konfiguracja
 OUTPUT_DIR="server_inventory_$(hostname)_$(date +%Y%m%d)"

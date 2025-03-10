@@ -1,0 +1,49 @@
+{
+    "certificates": [
+        {
+            "domain": "example.com",
+            "path": "/etc/letsencrypt/live/example.com/fullchain.pem",
+            "key_path": "/etc/letsencrypt/live/example.com/privkey.pem",
+            "auto_renew": true,
+            "notify_days": [30, 14, 7, 3, 1]
+        },
+        {
+            "domain": "subdomain.example.org",
+            "path": "/etc/ssl/certs/subdomain.example.org.pem",
+            "key_path": "/etc/ssl/private/subdomain.example.org.key",
+            "auto_renew": false
+        },
+        {
+            "domain": "api.example.net",
+            "path": "/etc/letsencrypt/live/api.example.net/fullchain.pem",
+            "auto_renew": true
+        }
+    ],
+    "notification": {
+        "email": {
+            "enabled": true,
+            "smtp_server": "smtp.example.com",
+            "smtp_port": 587,
+            "username": "admin",
+            "password": "password",
+            "from_email": "admin@example.com",
+            "to_email": ["admin@example.com", "security@example.com"]
+        },
+        "slack": {
+            "enabled": true,
+            "webhook_url": "https://hooks.slack.com/services/XXXXX/YYYYY/ZZZZZ"
+        }
+    },
+    "certbot": {
+        "path": "/usr/bin/certbot",
+        "args": "--post-hook 'systemctl reload nginx'",
+        "method": "webroot",
+        "webroot_path": "/var/www/html"
+    },
+    "general": {
+        "threshold_days": 30,
+        "scan_interval": 86400,
+        "log_file": "/var/log/cert_manager.log",
+        "verbose": true
+    }
+}
